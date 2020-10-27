@@ -2,12 +2,14 @@ const delay = require('delay');
 const deleteInputValue = require('../utils/deleteInputValue');
 const randomIntFromInterval = require('../utils/randomIntFromInterval');
 const isJson = require('../utils/isJson');
+const PageInstagram = require('../entity/pageInstagram');
 
 module.exports = class FindViralContent {
     constructor(browser, maxPage, pageNames) {
         this.browser = browser;
         this.maxPage = maxPage;
-        this.pages = [];
+        this.pages = [];// puppeteer pages
+        this.pageInstagram = [];
         this.similarPagesDone = [];
         this.pageNames = pageNames;
         this.minWaitTime = 5000;
@@ -15,39 +17,84 @@ module.exports = class FindViralContent {
 
         this.login(browser).then(() => {
             this.createPages().then(() => {
+                let i = 0;
                 for (let page of this.pages) {
-                    this.start(page);
+                    this.start(page, i);
+                    i++;
                 }
             });
         });
     }
 
-    async start(page) {
+    async start(page, indexPage) {
+        this.findBestContent();
         if (this.pageNames.length === 0) {
             await delay(randomIntFromInterval(this.minWaitTime, this.maxWaitTime));
-            this.start(page);
+            this.start(page, indexPage);
         } else {
+            let pageInstagram = null;
             const pageName = this.pageNames[0];
+            this.similarPagesDone.push(pageName);
             this.pageNames.splice(0, 1);
+            console.log(indexPage + ' scrapping ' + pageName)
             page.goto('https://www.instagram.com/' + pageName + '/');
+            const responseToGet = 2; // similar pages and this page
+            let i = 0;
+            let done = false;
             page.on('response', async (response) => {
                 const request = response.request();
-                if (
-                    request.resourceType() === 'xhr'
-                    && request.method() === 'GET'
-                    && request.url().includes('https://www.instagram.com/graphql/query/?query_hash=')
-                    && response.status() === 200
-                ) {
-                    let result = await response.text();
-                    if (isJson(result)) {
-                        result = JSON.parse(result);
-                        console.log(result);
+                if (request.method() === 'GET' && response.status() === 200) {
+                    let result = null;
+                    try {
+                        result = await response.text();
+                    } catch (e) {
+                        return;
                     }
-                    // await page.goto('about:blank');
-                    // await page.close();
+                    if (request.resourceType() === 'xhr' && request.url().includes('https://www.instagram.com/graphql/query/?query_hash=') && isJson(result)) {
+                        result = JSON.parse(result);
+                        if (result.status === 'ok' && typeof result.data !== 'undefined' && typeof result.data.user !== 'undefined') {
+                            if (typeof result.data.user.edge_chaining !== 'undefined' && Array.isArray(result.data.user.edge_chaining.edges)) {
+                                i++;
+                                for (let x of result.data.user.edge_chaining.edges) {
+                                    const username = x.node.username;
+                                    if (!this.pageNames.includes(username) && !this.similarPagesDone.includes(username)) {
+                                        this.pageNames.push(username);
+                                    }
+                                }
+                            }
+                        }
+                    } else if (request.resourceType() === 'document') {
+                        i++;
+                        result = result.match(/(?<=window._sharedData =)(.*)<\/script>/g);
+                        result = JSON.parse(result[0].replace(';</script>', '').trim());
+                        pageInstagram = new PageInstagram(result);
+                        this.pageInstagram.push(pageInstagram);
+                    }
+                    if (i === responseToGet && done === false) {
+                        done = true;
+                        await page.goto('about:blank');
+                        await page.close();
+                        page = await this.browser.newPage();
+                        this.start(page, indexPage);
+                    }
                 }
             });
         }
+    }
+
+    findBestContent() {
+        let bestContent = null;
+        for (let pageInstagram of this.pageInstagram) {
+            const max = pageInstagram.postInstagrams.reduce((prev, current) => {
+                return (prev.rating > current.rating) ? prev : current
+            });
+            if (bestContent === null) {
+                bestContent = max;
+            } else if (max.rating > bestContent.rating) {
+                bestContent = max;
+            }
+        }
+        console.log(bestContent);
     }
 
     async login(browser) {
