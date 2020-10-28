@@ -12,6 +12,6 @@ module.exports = class PostInstagram {
     }
 
     getRating(nbFollowers) {
-        return (this.nbLikes + this.nbComments) / ((Math.trunc(Date.now() / 1000) - this.timeStamp) + nbFollowers);
+        return ((this.nbLikes * 1) + (this.nbComments * 1)) / (((Math.trunc(Date.now() / 1000) - this.timeStamp) * 1) + (nbFollowers * 1));
     }
-}
+};

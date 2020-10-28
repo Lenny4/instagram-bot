@@ -1,4 +1,5 @@
 const delay = require('delay');
+const clone = require('clone');
 const deleteInputValue = require('../utils/deleteInputValue');
 const randomIntFromInterval = require('../utils/randomIntFromInterval');
 const isJson = require('../utils/isJson');
@@ -11,7 +12,9 @@ module.exports = class FindViralContent {
         this.pages = [];// puppeteer pages
         this.pageInstagram = [];
         this.similarPagesDone = [];
-        this.pageNames = pageNames;
+        this.pageNames = clone(pageNames);
+        this.pageNamesToGetCategories = clone(pageNames);
+        this.categories = [];
         this.minWaitTime = 5000;
         this.maxWaitTime = 10000;
 
@@ -36,11 +39,12 @@ module.exports = class FindViralContent {
             const pageName = this.pageNames[0];
             this.similarPagesDone.push(pageName);
             this.pageNames.splice(0, 1);
-            console.log(indexPage + ' scrapping ' + pageName)
+            console.log(indexPage + ' scrapping ' + pageName);
             page.goto('https://www.instagram.com/' + pageName + '/');
             const responseToGet = 2; // similar pages and this page
             let i = 0;
             let done = false;
+            let pageCategory = null;
             page.on('response', async (response) => {
                 const request = response.request();
                 if (request.method() === 'GET' && response.status() === 200) {
@@ -57,7 +61,8 @@ module.exports = class FindViralContent {
                                 i++;
                                 for (let x of result.data.user.edge_chaining.edges) {
                                     const username = x.node.username;
-                                    if (!this.pageNames.includes(username) && !this.similarPagesDone.includes(username)) {
+                                    if (!this.pageNames.includes(username) && !this.similarPagesDone.includes(username) &&
+                                        (pageCategory === null || (this.categories.includes(pageCategory)))) {
                                         this.pageNames.push(username);
                                     }
                                 }
@@ -67,6 +72,12 @@ module.exports = class FindViralContent {
                         i++;
                         result = result.match(/(?<=window._sharedData =)(.*)<\/script>/g);
                         result = JSON.parse(result[0].replace(';</script>', '').trim());
+                        if (this.pageNamesToGetCategories.includes(pageName)) {
+                            pageCategory = result.entry_data.ProfilePage[0].graphql.user.category_enum;
+                            if (!this.categories.includes(pageCategory)) {
+                                this.categories.push(pageCategory);
+                            }
+                        }
                         pageInstagram = new PageInstagram(result);
                         this.pageInstagram.push(pageInstagram);
                     }
@@ -94,7 +105,7 @@ module.exports = class FindViralContent {
                 bestContent = max;
             }
         }
-        console.log(bestContent);
+        console.log(bestContent, 'best content');
     }
 
     async login(browser) {
@@ -163,4 +174,4 @@ module.exports = class FindViralContent {
             }
         });
     }
-}
+};
